@@ -1011,6 +1011,10 @@ priv struct Matcher {
   cap_end : Array[Int]
   /// `i` 标志：忽略大小写。匹配字面量与字符类时做 simple case folding。
   ignore_case : Bool
+  /// `m` 标志：多行。`^`/`$` 匹配行首/行尾而非整串首尾。
+  multi_line : Bool
+  /// `s` 标志：dotall。`.` 也匹配行终止符。
+  dot_all : Bool
 }
 
 ///|
@@ -1021,6 +1025,8 @@ pub struct Regex {
   priv group_count : Int
   priv source : String
   priv ignore_case : Bool
+  priv multi_line : Bool
+  priv dot_all : Bool
 }
 
 ///|
@@ -1035,16 +1041,20 @@ pub fn Regex::compile(pattern : String) -> Regex raise RegexError {
 }
 
 ///|
-/// 编译，带 flags。当前支持 `i`（忽略大小写）；其它标志（`m`/`s`/`u`/`v`/
-/// `g`/`y`）尚不支持，遇到未知标志会抛 `RegexError`。
+/// 编译，带 flags。当前支持 `i`（忽略大小写）、`m`（多行）、`s`（dotall）；
+/// 其它标志（`u`/`v`/`g`/`y`）尚不支持，遇到未知标志会抛 `RegexError`。
 pub fn Regex::compile_with_flags(
   pattern : String,
   flags : String,
 ) -> Regex raise RegexError {
   let mut ignore_case = false
+  let mut multi_line = false
+  let mut dot_all = false
   for c in flags {
     match c {
       'i' => ignore_case = true
+      'm' => multi_line = true
+      's' => dot_all = true
       _ =>
         raise RegexError::SyntaxError(
           "unsupported flag '" + c.to_string() + "'",
@@ -1061,6 +1071,8 @@ pub fn Regex::compile_with_flags(
     group_count: parsed.2,
     source: pattern,
     ignore_case,
+    multi_line,
+    dot_all,
   }
 }
 
@@ -1107,6 +1119,8 @@ pub fn Regex::find(self : Regex, input : String) -> Bool {
     cap_start: [],
     cap_end: [],
     ignore_case: self.ignore_case,
+    multi_line: self.multi_line,
+    dot_all: self.dot_all,
   }
   m.prepare_captures(self.group_count)
   for i = 0; i <= codes.length(); i = i + 1 {
@@ -1145,6 +1159,8 @@ pub fn Regex::exec(self : Regex, input : String) -> Match? {
     cap_start: [],
     cap_end: [],
     ignore_case: self.ignore_case,
+    multi_line: self.multi_line,
+    dot_all: self.dot_all,
   }
   m.prepare_captures(self.group_count)
   let mut matched_end = -1
@@ -1195,6 +1211,8 @@ pub fn Regex::matches_whole(self : Regex, input : String) -> Bool {
     cap_start: [],
     cap_end: [],
     ignore_case: self.ignore_case,
+    multi_line: self.multi_line,
+    dot_all: self.dot_all,
   }
   m.prepare_captures(self.group_count)
   m.clear_captures()
@@ -1299,7 +1317,8 @@ fn Matcher::node_match(
         false
       }
     AnyChar =>
-      if pos < self.len && !is_line_terminator(self.input[pos]) {
+      if pos < self.len &&
+        (self.dot_all || !is_line_terminator(self.input[pos])) {
         k(pos + 1)
       } else {
         false
@@ -1417,8 +1436,30 @@ fn Matcher::node_match(
         }
       }
     }
-    StartAnchor => if pos == 0 { k(pos) } else { false }
-    EndAnchor => if pos == self.len { k(pos) } else { false }
+    StartAnchor => {
+      // `m` 下匹配行首：pos==0 或前一个字符是行终止符。
+      let at_start = pos == 0 ||
+        (self.multi_line && pos > 0 && is_line_terminator(self.input[pos - 1]))
+      if at_start {
+        k(pos)
+      } else {
+        false
+      }
+    }
+    EndAnchor => {
+      // `m` 下匹配行尾：pos==len 或当前字符是行终止符。
+      let at_end = pos == self.len ||
+        (
+          self.multi_line &&
+          pos < self.len &&
+          is_line_terminator(self.input[pos])
+        )
+      if at_end {
+        k(pos)
+      } else {
+        false
+      }
+    }
     WordBoundary(want) => {
       let before = pos > 0 && is_word_cp(self.input[pos - 1])
       let after = pos < self.len && is_word_cp(self.input[pos])

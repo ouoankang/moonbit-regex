@@ -65,8 +65,8 @@ fn main {
         let ok = match kind {
           "test" => {
             let expected = obj_bool(o, "expected")
-            let ignore_case = obj_bool(o, "ignoreCase")
-            let re = match try_compile(pattern, ignore_case) {
+            let flags = obj_str(o, "flags")
+            let re = match try_compile(pattern, flags) {
               Some(r) => r
               None => {
                 failed = failed + 1
@@ -77,8 +77,8 @@ fn main {
           }
           _ => {
             // exec 形态：对比 captures 数组与 index
-            let ignore_case = obj_bool(o, "ignoreCase")
-            let re = match try_compile(pattern, ignore_case) {
+            let flags = obj_str(o, "flags")
+            let re = match try_compile(pattern, flags) {
               Some(r) => r
               None => {
                 failed = failed + 1
@@ -151,8 +151,7 @@ fn try_parse(text : String) -> Json? {
 }
 
 ///|
-fn try_compile(pattern : String, ignore_case : Bool) -> @regex.Regex? {
-  let flags = if ignore_case { "i" } else { "" }
+fn try_compile(pattern : String, flags : String) -> @regex.Regex? {
   Some(@regex.Regex::compile_with_flags(pattern, flags)) catch {
     _ => None
   }

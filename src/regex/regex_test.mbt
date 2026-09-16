@@ -397,15 +397,15 @@ test "ignore-case flag: unicode simple case folding" {
 }
 
 ///|
-test "ignore-case flag: unsupported flag raises" {
+test "unsupported flag raises" {
   let raised = try {
-    let _ = Regex::compile_with_flags("abc", "m")
+    let _ = Regex::compile_with_flags("abc", "u")
     false
   } catch {
     _ => true
   }
   if !raised {
-    fail("m flag should raise (unsupported)")
+    fail("u flag should raise (unsupported)")
   }
 }
 
@@ -531,4 +531,47 @@ test "lookbehind captures (test262 lookBehind/captures.js)" {
   assert_eq(m7.matched, "ab")
   assert_eq(m7.captures[1], Some("a"))
   assert_eq(m7.captures[2], Some("b"))
+}
+
+///|
+test "multiline flag: anchors match line boundaries" {
+  // m 下 ^ 匹配行首，$ 匹配行尾
+  let m = Regex::compile_with_flags("^a", "m")
+  if !m.find("b\na") {
+    fail("m: ^a should match line-start a")
+  }
+  let m2 = Regex::compile_with_flags("a$", "m")
+  if !m2.find("a\nb") {
+    fail("m: a$ should match line-end a")
+  }
+  // 无 m 时 ^ 不匹配内部行首
+  let no_m = Regex::compile("^a")
+  if no_m.find("b\na") {
+    fail("without m, ^a should not match inner a")
+  }
+}
+
+///|
+test "dotall flag: dot matches line terminators" {
+  let s = Regex::compile_with_flags("a.b", "s")
+  if !s.find("a\nb") {
+    fail("s: a.b should match a\\nb")
+  }
+  let no_s = Regex::compile("a.b")
+  if no_s.find("a\nb") {
+    fail("without s, a.b should not match a\\nb")
+  }
+}
+
+///|
+test "combined flags ims" {
+  let re = Regex::compile_with_flags("^a.b$", "ims")
+  if !re.find("A\nB") {
+    fail("ims: ^a.b$ should match A\\nB (case-insensitive + dotall)")
+  }
+  // m 让 ^...$ 匹配单行
+  let line = Regex::compile_with_flags("^x$", "m")
+  if !line.find("y\nx\nz") {
+    fail("m: ^x$ should match the middle line")
+  }
 }

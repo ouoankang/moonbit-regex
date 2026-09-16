@@ -9,13 +9,14 @@
 
 | 指标 | 结果 |
 | --- | --- |
-| **test262 一致性**（S15.10.2.x） | **172 / 172（100.0%）** |
+| **test262 一致性**（S15.10.2.x） | **178 / 178（100.0%）** |
 | `\d`／`\w`／`\s` 穷举验证 | U+0000..U+10FFFF 全码点与 test262 一致 |
-| `i` 忽略大小写 | Unicode simple case folding（含非 ASCII） |
+| 支持 flags | `i`（忽略大小写）、`m`（多行）、`s`（dotall） |
+| `i` case folding | Unicode simple case folding（约 1600 码点，含非 ASCII） |
 | ECMA-262 语义用例 | ecmascript-regex.json 86/86、non-bmp-regex.json 12/12 |
 | 官方一致性套件 · 必测用例 | 1301 / 1301（100.0%，校验器测试床） |
 | 官方一致性套件 · 可选用例 | 929 / 1023（90.8%） |
-| 单元测试 | 75 / 75 通过（默认 `wasm` 目标） |
+| 单元测试 | 82 / 82 通过（默认 `wasm` 目标） |
 | 自写源码 | 约 6 000 行 MoonBit（不含生成的 Unicode 表与元 schema） |
 
 ---
@@ -68,7 +69,7 @@ ASCII 语义、按码点推进、恒等转义限制这些 ECMA-262 的关键差�
 结果完全一致的正则引擎。正确性有**三层证据**：
 
 - **test262**（ECMA-262 官方一致性套件）的 `S15.10.2.x` 正则用例，
-  **172/172（100.0%）** 通过（见 [一致性测试成绩](#一致性测试成绩)）；
+  **178/178（100.0%）** 通过（见 [一致性测试成绩](#一致性测试成绩)）；
 - **全码点穷举**：`\d`／`\w`／`\s` 在 U+0000..U+10FFFF 的每个码点上与
   test262 期望完全一致；
 - JSON Schema 官方套件里**专门针对 ECMA-262 语义分歧**的用例：
@@ -222,6 +223,10 @@ if re.matches_whole("2026") { println("匹配") }
 let ci = @regex.Regex::compile_with_flags("^café$", "i")
 if ci.matches_whole("CAFÉ") { println("忽略大小写匹配") }
 
+// m（多行）+ s（dotall）：^$ 匹配行边界，. 匹配换行
+let lines = @regex.Regex::compile_with_flags("^x$", "m")
+let dotall = @regex.Regex::compile_with_flags("a.b", "s")
+
 // 判断一个模式是否合法（严格 ECMA-262，拒绝 \a 这类恒等转义）
 @regex.Regex::is_valid_strict("(?<name>x)")
 ```
@@ -323,7 +328,7 @@ node scripts/build-web.mjs
 
 ```sh
 moon run --target js cmd/test262
-# test262 (S15.10.2.x): 172/172
+# test262 (S15.10.2.x): 178/178
 ```
 
 用例由 `scripts/gen-test262.mjs` 从 test262 仓库提取成 `tests/test262/data.json`
@@ -566,10 +571,10 @@ if !v.vocab_unevaluated { effective = without_keywords(effective, unevaluated_ke
 
 **正则引擎的边界（核心）**：
 
-1. **支持 `i`（忽略大小写），其余 flags 不支持**（`m`/`s`/`u`/`v`/`g`/`y`）。
-   `i` 用 ECMA-262 非 Unicode 模式的 simple case folding（`toUpperCase` 首码点，
-   覆盖约 1600 个有大小写的码点，含非 ASCII）。带 `u`/`m`/`s`/`g`/`y` 的
-   test262 用例在提取阶段排除，这是明确的 scope 边界。
+1. **支持 `i`（忽略大小写）、`m`（多行）、`s`（dotall），其余 flags 不支持**
+   （`u`/`v`/`g`/`y`）。`i` 用 ECMA-262 非 Unicode 模式的 simple case folding
+   （`toUpperCase` 首码点，覆盖约 1600 个有大小写的码点，含非 ASCII）。
+   带 `u`/`v`/`g`/`y` 的 test262 用例在提取阶段排除，这是明确的 scope 边界。
 2. **不支持 `v` 模式的 Unicode 集合记法**（`unicodeSets`）与 `d` 标志
    （match indices）。这些是较新的 ECMA-262 提案，属后续扩展。
 
