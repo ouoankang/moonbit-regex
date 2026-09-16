@@ -971,6 +971,8 @@ priv struct Matcher {
   names : Map[String, Int]
   cap_start : Array[Int]
   cap_end : Array[Int]
+  /// `i` 标志：忽略大小写。匹配字面量与字符类时做 simple case folding。
+  ignore_case : Bool
 }
 
 ///|
@@ -980,6 +982,7 @@ pub struct Regex {
   priv names : Map[String, Int]
   priv group_count : Int
   priv source : String
+  priv ignore_case : Bool
 }
 
 ///|
@@ -990,11 +993,37 @@ pub impl Show for Regex with fn output(self, logger) {
 ///|
 /// 编译。模式不合法时抛出 `RegexError`。
 pub fn Regex::compile(pattern : String) -> Regex raise RegexError {
+  Regex::compile_with_flags(pattern, "")
+}
+
+///|
+/// 编译，带 flags。当前支持 `i`（忽略大小写）；其它标志（`m`/`s`/`u`/`v`/
+/// `g`/`y`）尚不支持，遇到未知标志会抛 `RegexError`。
+pub fn Regex::compile_with_flags(
+  pattern : String,
+  flags : String,
+) -> Regex raise RegexError {
+  let mut ignore_case = false
+  for c in flags {
+    match c {
+      'i' => ignore_case = true
+      _ =>
+        raise RegexError::SyntaxError(
+          "unsupported flag '" + c.to_string() + "'",
+        )
+    }
+  }
   let parsed = match parse_pattern(pattern) {
     Ok(p) => p
     Err(message) => raise SyntaxError(message)
   }
-  { prog: parsed.0, names: parsed.1, group_count: parsed.2, source: pattern, }
+  {
+    prog: parsed.0,
+    names: parsed.1,
+    group_count: parsed.2,
+    source: pattern,
+    ignore_case,
+  }
 }
 
 ///|
@@ -1039,6 +1068,7 @@ pub fn Regex::find(self : Regex, input : String) -> Bool {
     names: self.names,
     cap_start: [],
     cap_end: [],
+    ignore_case: self.ignore_case,
   }
   m.prepare_captures(self.group_count)
   for i = 0; i <= codes.length(); i = i + 1 {
@@ -1076,6 +1106,7 @@ pub fn Regex::exec(self : Regex, input : String) -> Match? {
     names: self.names,
     cap_start: [],
     cap_end: [],
+    ignore_case: self.ignore_case,
   }
   m.prepare_captures(self.group_count)
   let mut matched_end = -1
@@ -1125,6 +1156,7 @@ pub fn Regex::matches_whole(self : Regex, input : String) -> Bool {
     names: self.names,
     cap_start: [],
     cap_end: [],
+    ignore_case: self.ignore_case,
   }
   m.prepare_captures(self.group_count)
   m.clear_captures()
@@ -1137,6 +1169,16 @@ fn Matcher::prepare_captures(self : Matcher, groups : Int) -> Unit {
   while self.cap_start.length() <= groups {
     self.cap_start.push(-1)
     self.cap_end.push(-1)
+  }
+}
+
+///|
+/// 两个码点是否匹配（`i` 下做 simple case folding）。
+fn Matcher::cp_eq(self : Matcher, a : Int, b : Int) -> Bool {
+  if self.ignore_case {
+    canonicalize_cp(a) == canonicalize_cp(b)
+  } else {
+    a == b
   }
 }
 
@@ -1175,7 +1217,7 @@ fn Matcher::node_match(
 ) -> Bool {
   match node {
     Lit(cp) =>
-      if pos < self.len && self.input[pos] == cp {
+      if pos < self.len && self.cp_eq(self.input[pos], cp) {
         k(pos + 1)
       } else {
         false
@@ -1187,7 +1229,8 @@ fn Matcher::node_match(
         false
       }
     Class(klass) =>
-      if pos < self.len && class_matches(klass, self.input[pos]) {
+      if pos < self.len &&
+        class_matches(klass, self.input[pos], self.ignore_case) {
         k(pos + 1)
       } else {
         false
@@ -1278,7 +1321,7 @@ fn Matcher::node_match(
         } else {
           let mut same = true
           for j = 0; j < width; j = j + 1 {
-            if self.input[pos + j] != self.input[start + j] {
+            if !self.cp_eq(self.input[pos + j], self.input[start + j]) {
               same = false
             }
           }
@@ -1382,12 +1425,35 @@ fn Matcher::repeat_match(
 
 ///|
 /// 字符类匹配。
-fn class_matches(klass : CharClass, cp : Int) -> Bool {
+fn class_matches(klass : CharClass, cp : Int, ignore_case : Bool) -> Bool {
   let mut hit = false
   for item in klass.items {
     match item {
-      CSingle(c) => if cp == c { hit = true }
-      CRange(lo, hi) => if cp >= lo && cp <= hi { hit = true }
+      CSingle(c) => {
+        let m = if ignore_case {
+          canonicalize_cp(cp) == canonicalize_cp(c)
+        } else {
+          cp == c
+        }
+        if m {
+          hit = true
+        }
+      }
+      CRange(lo, hi) => {
+        let match_lo = if ignore_case {
+          // `i` 下区间要比较 canonicalize：任一大小写落在 [lo,hi] 即命中。
+          // 简化：对区间端点与 cp 都 canonicalize 后比较是否落在折叠区间内。
+          let cl = canonicalize_cp(lo)
+          let ch = canonicalize_cp(hi)
+          let cc = canonicalize_cp(cp)
+          cc >= cl && cc <= ch
+        } else {
+          cp >= lo && cp <= hi
+        }
+        if match_lo {
+          hit = true
+        }
+      }
       CBuiltin(letter) => if builtin_matches(letter, cp) { hit = true }
       CProp(name, negated) => {
         let m = prop_matches(name, cp)

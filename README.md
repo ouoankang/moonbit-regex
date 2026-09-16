@@ -1,6 +1,6 @@
 # moonbit-regex
 
-**MoonBit 从零实现的 ECMA-262 正则引擎（无 flags pattern 匹配语义），跨 wasm／js／native 三后端结果一致。**
+**MoonBit 从零实现的 ECMA-262 正则引擎，跨 wasm／js／native 三后端结果一致。**
 
 附带一个 JSON Schema draft 2020-12 校验器，作为引擎的**验证测试床**。
 
@@ -9,12 +9,14 @@
 
 | 指标 | 结果 |
 | --- | --- |
-| **test262 一致性**（S15.10.2.x，无 flags 子集） | **164 / 166（98.8%）** |
+| **test262 一致性**（S15.10.2.x） | **170 / 172（98.8%）** |
+| `\d`／`\w`／`\s` 穷举验证 | U+0000..U+10FFFF 全码点与 test262 一致 |
+| `i` 忽略大小写 | Unicode simple case folding（含非 ASCII） |
 | ECMA-262 语义用例 | ecmascript-regex.json 86/86、non-bmp-regex.json 12/12 |
 | 官方一致性套件 · 必测用例 | 1301 / 1301（100.0%，校验器测试床） |
 | 官方一致性套件 · 可选用例 | 929 / 1023（90.8%） |
-| 单元测试 | 67 / 67 通过（默认 `wasm` 目标） |
-| 自写源码 | 约 5 900 行 MoonBit（不含生成的 Unicode 表与元 schema） |
+| 单元测试 | 75 / 75 通过（默认 `wasm` 目标） |
+| 自写源码 | 约 6 000 行 MoonBit（不含生成的 Unicode 表与元 schema） |
 
 ---
 
@@ -63,11 +65,12 @@ MoonBit 官方已有通用正则库 `moonbitlang/regexp`（基于 Russ Cox 的 V
 ASCII 语义、按码点推进、恒等转义限制这些 ECMA-262 的关键差异点。
 
 **本项目（`src/regex`）填补这个空白**：一个严格实现 ECMA-262 语义、跨三后端
-结果完全一致的正则引擎。正确性有**两层证据**：
+结果完全一致的正则引擎。正确性有**三层证据**：
 
-- **test262**（ECMA-262 官方一致性套件）的 `S15.10.2.x` 正则用例，适配
-  「无 flags 的 pattern 匹配语义」子集后，**164/166（98.8%）** 通过
-  （见 [一致性测试成绩](#一致性测试成绩)）；
+- **test262**（ECMA-262 官方一致性套件）的 `S15.10.2.x` 正则用例，
+  **170/172（98.8%）** 通过（见 [一致性测试成绩](#一致性测试成绩)）；
+- **全码点穷举**：`\d`／`\w`／`\s` 在 U+0000..U+10FFFF 的每个码点上与
+  test262 期望完全一致；
 - JSON Schema 官方套件里**专门针对 ECMA-262 语义分歧**的用例：
   `optional/ecmascript-regex.json` 86/86、`optional/non-bmp-regex.json` 12/12。
 
@@ -215,6 +218,10 @@ let compiled = @schema.Schema::of_with_documents(
 let re = @regex.Regex::compile("^\\d{3,4}$")
 if re.matches_whole("2026") { println("匹配") }
 
+// 忽略大小写（ECMA-262 simple case folding，含非 ASCII 如 é↔É、ß→S）
+let ci = @regex.Regex::compile_with_flags("^café$", "i")
+if ci.matches_whole("CAFÉ") { println("忽略大小写匹配") }
+
 // 判断一个模式是否合法（严格 ECMA-262，拒绝 \a 这类恒等转义）
 @regex.Regex::is_valid_strict("(?<name>x)")
 ```
@@ -311,13 +318,12 @@ node scripts/build-web.mjs
 
 ### 1. test262（ECMA-262 官方一致性套件）
 
-引擎的核心正确性用 test262 的 `S15.10.2.x` 正则用例验证。提取的是「**无 flags
-的 pattern 匹配语义**」子集（带 `u`/`i`/`m`/`s`/`g`/`y` 标志的用例在生成阶段
-排除——引擎目前不实现 flags，这是明确的边界）。
+引擎的核心正确性用 test262 的 `S15.10.2.x` 正则用例验证。提取时排除带
+`u`/`m`/`s`/`g`/`y` 标志的用例（这些标志尚不支持；`i` 已支持，见[已知限制](#已知限制)）。
 
 ```sh
 moon run --target js cmd/test262
-# test262 (S15.10.2.x, 无 flags 子集): 164/166
+# test262 (S15.10.2.x): 170/172
 ```
 
 用例由 `scripts/gen-test262.mjs` 从 test262 仓库提取成 `tests/test262/data.json`
@@ -561,14 +567,15 @@ if !v.vocab_unevaluated { effective = without_keywords(effective, unevaluated_ke
 
 **正则引擎的边界（核心）**：
 
-1. **不支持 flags**（`i`/`m`/`s`/`u`/`v`/`g`/`y`）。引擎实现的是「无 flags 的
-   pattern 匹配语义」——即 `compile(pattern)` 后 `find`/`exec` 的行为。带 flags
-   的 test262 用例在提取阶段就排除了，这是明确的 scope 边界，不虚报。
+1. **支持 `i`（忽略大小写），其余 flags 不支持**（`m`/`s`/`u`/`v`/`g`/`y`）。
+   `i` 用 ECMA-262 非 Unicode 模式的 simple case folding（`toUpperCase` 首码点，
+   覆盖约 1600 个有大小写的码点，含非 ASCII）。带 `u`/`m`/`s`/`g`/`y` 的
+   test262 用例在提取阶段排除，这是明确的 scope 边界。
 2. **不支持 `v` 模式的 Unicode 集合记法**（`unicodeSets`）与 `d` 标志
    （match indices）。这些是较新的 ECMA-262 提案，属后续扩展。
 3. **捕获组在「嵌套可选组 + 贪婪量词回溯」下的重置语义有 2 条 test262 用例
    未通过**（`S15.10.2.5_A1_T4`、`S15.10.2.8_A2_T1`）。这是量词迭代内捕获组
-   正确重置的精细语义，属已知缺陷，见 test262 成绩 164/166。
+   正确重置的精细语义，属已知缺陷，见 test262 成绩 170/172。
 
 **JSON Schema 校验器（测试床）的边界**：
 

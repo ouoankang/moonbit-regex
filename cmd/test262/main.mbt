@@ -3,8 +3,8 @@
 // 读 `tests/test262/data.json`（由 scripts/gen-test262.mjs 从官方 test262
 // 的 S15.10.2.x 用例提取），用引擎跑每一条，输出精确通过率。
 //
-// 只在 js 后端跑（读文件）。提取的范围是「无 flags 的 pattern 匹配语义」，
-// 带 flags（u/i/m/s/g/y）的用例在生成阶段已排除，这是引擎的诚实边界。
+// 只在 js 后端跑（读文件）。提取时排除带 u/m/s/g/y 标志的用例（这些标志
+// 尚不支持；i 已支持），这是引擎的诚实边界。
 //
 // 用法：
 //   moon run --target js cmd/test262
@@ -65,7 +65,8 @@ fn main {
         let ok = match kind {
           "test" => {
             let expected = obj_bool(o, "expected")
-            let re = match try_compile(pattern) {
+            let ignore_case = obj_bool(o, "ignoreCase")
+            let re = match try_compile(pattern, ignore_case) {
               Some(r) => r
               None => {
                 failed = failed + 1
@@ -76,7 +77,8 @@ fn main {
           }
           _ => {
             // exec 形态：对比 captures 数组与 index
-            let re = match try_compile(pattern) {
+            let ignore_case = obj_bool(o, "ignoreCase")
+            let re = match try_compile(pattern, ignore_case) {
               Some(r) => r
               None => {
                 failed = failed + 1
@@ -134,10 +136,7 @@ fn main {
   }
   let total = passed + failed
   println(
-    "test262 (S15.10.2.x, 无 flags 子集): " +
-    passed.to_string() +
-    "/" +
-    total.to_string(),
+    "test262 (S15.10.2.x): " + passed.to_string() + "/" + total.to_string(),
   )
   if failed > 0 {
     set_exit_code(1)
@@ -152,8 +151,9 @@ fn try_parse(text : String) -> Json? {
 }
 
 ///|
-fn try_compile(pattern : String) -> @regex.Regex? {
-  Some(@regex.Regex::compile(pattern)) catch {
+fn try_compile(pattern : String, ignore_case : Bool) -> @regex.Regex? {
+  let flags = if ignore_case { "i" } else { "" }
+  Some(@regex.Regex::compile_with_flags(pattern, flags)) catch {
     _ => None
   }
 }

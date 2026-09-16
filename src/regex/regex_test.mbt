@@ -351,3 +351,73 @@ test "alternation with negative lookahead" {
   assert_eq(m.index, 2)
   assert_eq(m.captures[1], Some("."))
 }
+
+///|
+test "ignore-case flag: ASCII literal" {
+  let re = Regex::compile_with_flags("abc", "i")
+  if !re.find("ABC") {
+    fail("i flag should match abc against ABC")
+  }
+  if !re.find("AbC") {
+    fail("i flag should match abc against AbC")
+  }
+  // 无 i 时不应匹配
+  let exact = Regex::compile("abc")
+  if exact.find("ABC") {
+    fail("without i, abc should not match ABC")
+  }
+}
+
+///|
+test "ignore-case flag: character class" {
+  let re = Regex::compile_with_flags("^[a-z]+$", "i")
+  if !re.matches_whole("HeLLo") {
+    fail("i flag should make [a-z] match uppercase")
+  }
+  if re.matches_whole("123") {
+    fail("[a-z] should not match digits")
+  }
+}
+
+///|
+test "ignore-case flag: unicode simple case folding" {
+  // é (U+00E9) 和 É (U+00C9) 应互相匹配
+  let re = Regex::compile_with_flags("café", "i")
+  if !re.find("CAFÉ") {
+    fail("i should fold é <-> É")
+  }
+  // ß (U+00DF) canonicalize 到 S，应和 s/S 匹配（ECMA-262 非 unicode 模式）
+  let sharp_s = Regex::compile_with_flags("^ß$", "i")
+  if !sharp_s.matches_whole("s") {
+    fail("i should fold ß to S (matching s)")
+  }
+  if !sharp_s.matches_whole("S") {
+    fail("i should fold ß to S (matching S)")
+  }
+}
+
+///|
+test "ignore-case flag: unsupported flag raises" {
+  let raised = try {
+    let _ = Regex::compile_with_flags("abc", "m")
+    false
+  } catch {
+    _ => true
+  }
+  if !raised {
+    fail("m flag should raise (unsupported)")
+  }
+}
+
+///|
+test "ignore-case flag: backreference folds too" {
+  // (a)\1 在 i 下应匹配 aA（反向引用也忽略大小写）
+  let re = Regex::compile_with_flags("^(a)\\1$", "i")
+  if !re.matches_whole("aA") {
+    fail("i should make backreference case-insensitive")
+  }
+  let exact = Regex::compile("^(a)\\1$")
+  if exact.matches_whole("aA") {
+    fail("without i, backreference should be case-sensitive")
+  }
+}

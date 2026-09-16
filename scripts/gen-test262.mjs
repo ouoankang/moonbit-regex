@@ -101,23 +101,25 @@ for (const { name, src } of results) {
   if (!el) { skipped++; continue; }
   const ex = extractExecLine(el);
   if (!ex) { skipped++; continue; }
-  if (ex.flags) { skipped++; continue; }
+  // 支持 i（忽略大小写）；其它 flags（u/m/s/g/y）排除
+  if (ex.flags && !/^i+$/.test(ex.flags)) { skipped++; continue; }
 
   const input = decode(ex.input);
+  const ignoreCase = ex.flags.includes("i");
 
   if (ex.method === ".test") {
     const neg = /assert\(!__executed/.test(src);
-    data.push({ file: name, pattern: ex.pattern, input, expected: !neg, kind: "test" });
+    data.push({ file: name, pattern: ex.pattern, input, expected: !neg, kind: "test", ignoreCase });
   } else {
     // .exec
     if (isExecNull(src)) {
-      data.push({ file: name, pattern: ex.pattern, input, expected: false, kind: "exec" });
+      data.push({ file: name, pattern: ex.pattern, input, expected: false, kind: "exec", ignoreCase });
       continue;
     }
     const arr = extractExpectedArray(src);
     if (arr === null) { skipped++; continue; }
     const index = extractIndex(src);
-    data.push({ file: name, pattern: ex.pattern, input, captures: arr, index, kind: "exec" });
+    data.push({ file: name, pattern: ex.pattern, input, captures: arr, index, kind: "exec", ignoreCase });
   }
 }
 
