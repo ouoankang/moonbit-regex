@@ -1003,6 +1003,12 @@ fn Parser::parse_class_atom(self : Parser) -> Result[ClassItem, String] {
 // ---------------------------------------------------------------------------
 
 ///|
+/// 回溯步数上限。灾难性回溯（如 `(a+)+b` 对不匹配的长串）会让 CPS 回溯
+/// 指数爆炸，这个上限把最坏情况钉死在常数级——超限即「放弃匹配」（返回
+/// 不匹配），而不是挂死。正常模式（短 pattern、短输入）远达不到这个数。
+const STEP_LIMIT : Int = 1000000
+
+///|
 priv struct Matcher {
   input : Array[Int]
   len : Int
@@ -1015,6 +1021,8 @@ priv struct Matcher {
   multi_line : Bool
   /// `s` 标志：dotall。`.` 也匹配行终止符。
   dot_all : Bool
+  /// 回溯步数计数器（单元素数组，模拟跨递归可变）。`[0]` 是当前步数。
+  steps : Array[Int]
 }
 
 ///|
@@ -1121,6 +1129,7 @@ pub fn Regex::find(self : Regex, input : String) -> Bool {
     ignore_case: self.ignore_case,
     multi_line: self.multi_line,
     dot_all: self.dot_all,
+    steps: [0],
   }
   m.prepare_captures(self.group_count)
   for i = 0; i <= codes.length(); i = i + 1 {
@@ -1161,6 +1170,7 @@ pub fn Regex::exec(self : Regex, input : String) -> Match? {
     ignore_case: self.ignore_case,
     multi_line: self.multi_line,
     dot_all: self.dot_all,
+    steps: [0],
   }
   m.prepare_captures(self.group_count)
   let mut matched_end = -1
@@ -1213,6 +1223,7 @@ pub fn Regex::matches_whole(self : Regex, input : String) -> Bool {
     ignore_case: self.ignore_case,
     multi_line: self.multi_line,
     dot_all: self.dot_all,
+    steps: [0],
   }
   m.prepare_captures(self.group_count)
   m.clear_captures()
@@ -1309,6 +1320,11 @@ fn Matcher::node_match(
   pos : Int,
   k : (Int) -> Bool,
 ) -> Bool {
+  // 回溯步数上限：超限即放弃（返回不匹配），防止灾难性回溯挂死。
+  self.steps[0] = self.steps[0] + 1
+  if self.steps[0] > STEP_LIMIT {
+    return false
+  }
   match node {
     Lit(cp) =>
       if pos < self.len && self.cp_eq(self.input[pos], cp) {

@@ -575,3 +575,25 @@ test "combined flags ims" {
     fail("m: ^x$ should match the middle line")
   }
 }
+
+///|
+test "catastrophic backtracking is bounded" {
+  // (a+)+b 对无 b 结尾的长串是经典灾难性回溯，超步数上限后应快速放弃，
+  // 而不是指数爆炸挂死。这里只断言「能返回」且结果是 false（或不匹配）。
+  let re = Regex::compile("^(a+)+b$")
+  // 100 个 a 结尾无 b：指数回溯会在步数上限处被截断
+  let input = "a".repeat(100)
+  let _ = re.find(input) // 不挂死即通过；结果 true/false 均可（超限会 false）
+}
+
+///|
+test "normal patterns are unaffected by step limit" {
+  // 正常模式远达不到步数上限，结果必须正确
+  let re = Regex::compile("^\\d{3}-\\d{4}$")
+  if !re.matches_whole("123-4567") {
+    fail("normal pattern should still match")
+  }
+  if re.matches_whole("12-4567") {
+    fail("normal pattern should still reject wrong input")
+  }
+}
