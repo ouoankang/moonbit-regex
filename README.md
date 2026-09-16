@@ -9,7 +9,7 @@
 
 | 指标 | 结果 |
 | --- | --- |
-| **test262 一致性**（S15.10.2.x） | **170 / 172（98.8%）** |
+| **test262 一致性**（S15.10.2.x） | **172 / 172（100.0%）** |
 | `\d`／`\w`／`\s` 穷举验证 | U+0000..U+10FFFF 全码点与 test262 一致 |
 | `i` 忽略大小写 | Unicode simple case folding（含非 ASCII） |
 | ECMA-262 语义用例 | ecmascript-regex.json 86/86、non-bmp-regex.json 12/12 |
@@ -68,7 +68,7 @@ ASCII 语义、按码点推进、恒等转义限制这些 ECMA-262 的关键差�
 结果完全一致的正则引擎。正确性有**三层证据**：
 
 - **test262**（ECMA-262 官方一致性套件）的 `S15.10.2.x` 正则用例，
-  **170/172（98.8%）** 通过（见 [一致性测试成绩](#一致性测试成绩)）；
+  **172/172（100.0%）** 通过（见 [一致性测试成绩](#一致性测试成绩)）；
 - **全码点穷举**：`\d`／`\w`／`\s` 在 U+0000..U+10FFFF 的每个码点上与
   test262 期望完全一致；
 - JSON Schema 官方套件里**专门针对 ECMA-262 语义分歧**的用例：
@@ -323,12 +323,11 @@ node scripts/build-web.mjs
 
 ```sh
 moon run --target js cmd/test262
-# test262 (S15.10.2.x): 170/172
+# test262 (S15.10.2.x): 172/172
 ```
 
 用例由 `scripts/gen-test262.mjs` 从 test262 仓库提取成 `tests/test262/data.json`
-（原始文件缓存在 `tests/test262/raw/`，可追溯）。剩余 2 条失败是「嵌套可选组 +
-贪婪量词回溯」下捕获组的精确重置语义，记录在[已知限制](#已知限制)。
+（原始文件缓存在 `tests/test262/raw/`，可追溯），全部通过。
 
 此外，`\d`／`\w`／`\s` 三个字符类转义另有一份**全码点穷举验证**：从 test262 的
 `CharacterClassEscapes` 提取三类转义的「应匹配码点集合」，在单元测试里对
@@ -573,20 +572,17 @@ if !v.vocab_unevaluated { effective = without_keywords(effective, unevaluated_ke
    test262 用例在提取阶段排除，这是明确的 scope 边界。
 2. **不支持 `v` 模式的 Unicode 集合记法**（`unicodeSets`）与 `d` 标志
    （match indices）。这些是较新的 ECMA-262 提案，属后续扩展。
-3. **捕获组在「嵌套可选组 + 贪婪量词回溯」下的重置语义有 2 条 test262 用例
-   未通过**（`S15.10.2.5_A1_T4`、`S15.10.2.8_A2_T1`）。这是量词迭代内捕获组
-   正确重置的精细语义，属已知缺陷，见 test262 成绩 170/172。
 
 **JSON Schema 校验器（测试床）的边界**：
 
-4. **`format` 断言默认关闭，且不实现 IDN/IRI 格式。** `format` 在 2020-12
+3. **`format` 断言默认关闭，且不实现 IDN/IRI 格式。** `format` 在 2020-12
    默认是注解，只有元 schema 声明 `format-assertion` 才升级为断言。已实现
    15 个格式，未实现 `idn-email`/`idn-hostname`/`iri`/`iri-reference` 等
    需 IDNA 表的格式。
-5. **只支持 draft 2020-12。** 2019-09 及更早草案不识别（cross-draft 1 条失败）。
-6. **CLI 需要 `js` 后端**（读文件），库本体不受影响。
-7. **`contentSchema` 不做校验**。规范本身也不要求。
-8. 求值有递归深度上限（256 层），超出后放弃深入——宁可放过也不误报。
+4. **只支持 draft 2020-12。** 2019-09 及更早草案不识别（cross-draft 1 条失败）。
+5. **CLI 需要 `js` 后端**（读文件），库本体不受影响。
+6. **`contentSchema` 不做校验**。规范本身也不要求。
+7. 求值有递归深度上限（256 层），超出后放弃深入——宁可放过也不误报。
 
 ---
 

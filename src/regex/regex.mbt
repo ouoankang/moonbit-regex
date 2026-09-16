@@ -54,13 +54,18 @@ priv enum Node {
   Class(CharClass)
   Seq(Array[Node])
   Alt(Array[Node])
-  /// 量词：`(子式, 最少次数, 最多次数(-1 表示无穷), 是否贪婪)`
-  Repeat(Node, Int, Int, Bool)
+  /// 量词：`(子式, 最少次数, 最多次数(-1 表示无穷), 是否贪婪)`。
+  /// `inner_groups` 是子式内部的所有捕获组编号——量词「匹配 0 次」时，
+  /// 这些组要重置为「未参与」（ECMA-262 的捕获语义：没在最终路径上执行的
+  /// 组是 undefined，而不是保留上一次迭代的脏值）。
+  Repeat(Node, Int, Int, Bool, Array[Int])
   /// 捕获组，带编号。
   Group(Int, Node)
   NonCapture(Node)
-  /// 前后瞻：`(子式, 是否后瞻, 是否取反)`
-  Look(Node, Bool, Bool)
+  /// 前后瞻：`(子式, 是否后瞻, 是否取反, 内部捕获组编号)`。
+  /// 前瞻（含后瞻）内部的捕获组，在前瞻匹配结束后要恢复到进入前的值——
+  /// ECMA-262 规定前瞻内捕获组的变化不影响前瞻外的匹配（§22.2.2.9）。
+  Look(Node, Bool, Bool, Array[Int])
   Backref(RefTarget)
   StartAnchor
   EndAnchor
@@ -275,6 +280,39 @@ fn is_builtin_class_letter(cp : Int) -> Bool {
   cp == 0x53
 }
 
+///|
+/// 收集一个 AST 子树内所有捕获组的编号（去重、升序）。
+/// 供 `Repeat` 在「匹配 0 次」时把这些组重置为未参与。
+fn collect_groups(node : Node) -> Array[Int] {
+  let out : Array[Int] = []
+  collect_groups_into(node, out)
+  out
+}
+
+///|
+fn collect_groups_into(node : Node, out : Array[Int]) -> Unit {
+  match node {
+    Group(index, inner) => {
+      if !out.contains(index) {
+        out.push(index)
+      }
+      collect_groups_into(inner, out)
+    }
+    Seq(list) =>
+      for n in list {
+        collect_groups_into(n, out)
+      }
+    Alt(branches) =>
+      for b in branches {
+        collect_groups_into(b, out)
+      }
+    Repeat(inner, _, _, _, _) => collect_groups_into(inner, out)
+    NonCapture(inner) => collect_groups_into(inner, out)
+    Look(inner, _, _, _) => collect_groups_into(inner, out)
+    _ => ()
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 解析
 // ---------------------------------------------------------------------------
@@ -454,7 +492,7 @@ fn Parser::parse_term(self : Parser) -> Result[Node, String] {
       } else {
         false
       }
-      Ok(Repeat(atom, pair.0, pair.1, !lazy_))
+      Ok(Repeat(atom, pair.0, pair.1, !lazy_, collect_groups(atom)))
     }
   }
 }
@@ -606,14 +644,14 @@ fn Parser::parse_group(self : Parser) -> Result[Node, String] {
       // (?= ... )
       self.pos = self.pos + 1
       self.finish_group(start, fn(inner : Node) -> Node {
-        Look(inner, false, false)
+        Look(inner, false, false, collect_groups(inner))
       })
     }
     0x21 => {
       // (?! ... )
       self.pos = self.pos + 1
       self.finish_group(start, fn(inner : Node) -> Node {
-        Look(inner, false, true)
+        Look(inner, false, true, collect_groups(inner))
       })
     }
     0x3C =>
@@ -623,7 +661,7 @@ fn Parser::parse_group(self : Parser) -> Result[Node, String] {
           let negated = self.at(1) == 0x21
           self.pos = self.pos + 2
           self.finish_group(start, fn(inner : Node) -> Node {
-            Look(inner, true, negated)
+            Look(inner, true, negated, collect_groups(inner))
           })
         }
         _ => {
@@ -1183,6 +1221,44 @@ fn Matcher::cp_eq(self : Matcher, a : Int, b : Int) -> Bool {
 }
 
 ///|
+/// 保存一组捕获组当前的 (start, end) 值。
+fn Matcher::save_groups(
+  self : Matcher,
+  groups : Array[Int],
+) -> Array[(Int, Int)] {
+  let out : Array[(Int, Int)] = []
+  for g in groups {
+    out.push((self.cap_start[g], self.cap_end[g]))
+  }
+  out
+}
+
+///|
+/// 恢复一组捕获组到之前保存的 (start, end) 值。
+fn Matcher::restore_groups(
+  self : Matcher,
+  groups : Array[Int],
+  saved : Array[(Int, Int)],
+) -> Unit {
+  let mut i = 0
+  while i < groups.length() {
+    let (s, e) = saved[i]
+    self.cap_start[groups[i]] = s
+    self.cap_end[groups[i]] = e
+    i = i + 1
+  }
+}
+
+///|
+/// 把一组捕获组重置为「未参与」（-1）。
+fn Matcher::reset_groups(self : Matcher, groups : Array[Int]) -> Unit {
+  for g in groups {
+    self.cap_start[g] = -1
+    self.cap_end[g] = -1
+  }
+}
+
+///|
 /// 把捕获表清空（-1 表示未参与匹配）。
 fn Matcher::clear_captures(self : Matcher) -> Unit {
   for i = 0; i < self.cap_start.length(); i = i + 1 {
@@ -1253,8 +1329,8 @@ fn Matcher::node_match(
       }
       false
     }
-    Repeat(inner, min, max, greedy) =>
-      self.repeat_match(inner, min, max, greedy, 0, pos, k)
+    Repeat(inner, min, max, greedy, inner_groups) =>
+      self.repeat_match(inner, min, max, greedy, 0, pos, k, inner_groups)
     Group(index, inner) => {
       let saved_start = self.cap_start[index]
       let saved_end = self.cap_end[index]
@@ -1280,11 +1356,19 @@ fn Matcher::node_match(
       ok
     }
     NonCapture(inner) => self.node_match(inner, pos, k)
-    Look(inner, behind, negated) => {
+    Look(inner, behind, negated, inner_groups) => {
+      let saved = self.save_groups(inner_groups)
       let hit = if behind {
         self.matches_ending_at(inner, pos)
       } else {
         self.node_match(inner, pos, fn(_p : Int) -> Bool { true })
+      }
+      // 捕获组的保留规则（ECMA-262 §22.2.2.9）：
+      // 只有「正向前瞻成功」（内部确实匹配了）才保留内部捕获；
+      // 否定前瞻成功（内部没匹配）或任何前瞻失败，都恢复内部捕获。
+      let keep = !negated && hit
+      if !keep {
+        self.restore_groups(inner_groups, saved)
       }
       if hit != negated {
         k(pos)
@@ -1375,6 +1459,7 @@ fn Matcher::repeat_match(
   count : Int,
   pos : Int,
   k : (Int) -> Bool,
+  inner_groups : Array[Int],
 ) -> Bool {
   let can_more = max < 0 || count < max
   if greedy {
@@ -1390,7 +1475,16 @@ fn Matcher::repeat_match(
             false
           }
         } else {
-          self.repeat_match(inner, min, max, greedy, count + 1, p, k)
+          self.repeat_match(
+            inner,
+            min,
+            max,
+            greedy,
+            count + 1,
+            p,
+            k,
+            inner_groups,
+          )
         }
       })
       if advanced {
@@ -1398,12 +1492,33 @@ fn Matcher::repeat_match(
       }
     }
     if count >= min {
+      // 停止迭代。若一次都没匹配（count == 0），inner 里的捕获组
+      // 从未在最终路径上执行，应为「未参与」，而非残留上一次迭代的脏值。
+      if count == 0 {
+        let saved = self.save_groups(inner_groups)
+        self.reset_groups(inner_groups)
+        if k(pos) {
+          return true
+        }
+        self.restore_groups(inner_groups, saved)
+        return false
+      }
       return k(pos)
     }
     false
   } else {
-    if count >= min && k(pos) {
-      return true
+    if count >= min {
+      // 惰性：优先尝试「匹配 0 次额外」就停。
+      if count == 0 {
+        let saved = self.save_groups(inner_groups)
+        self.reset_groups(inner_groups)
+        if k(pos) {
+          return true
+        }
+        self.restore_groups(inner_groups, saved)
+      } else if k(pos) {
+        return true
+      }
     }
     if can_more {
       return self.node_match(inner, pos, fn(p : Int) -> Bool {
@@ -1415,7 +1530,16 @@ fn Matcher::repeat_match(
             false
           }
         } else {
-          self.repeat_match(inner, min, max, greedy, count + 1, p, k)
+          self.repeat_match(
+            inner,
+            min,
+            max,
+            greedy,
+            count + 1,
+            p,
+            k,
+            inner_groups,
+          )
         }
       })
     }

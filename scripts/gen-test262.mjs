@@ -123,6 +123,12 @@ for (const { name, src } of results) {
   }
 }
 
+// ---- lookBehind 目录：str.match(/pat/) + assert.compareArray([...]) ----
+// 注意：lookBehind 用例常把多条 assert.compareArray 挤在同一行（分号分隔），
+// 且 pattern 含嵌套括号/字符类，正则自动提取极易串行产生错误数据。
+// 因此这里**不自动提取** lookBehind，而是由精选的 MoonBit 单测覆盖
+// （见 src/regex/regex_test.mbt 的 lookbehind 用例）。
+
 writeFileSync(OUT, JSON.stringify(data, null, 0), "utf8");
 console.log(`提取完成: ${data.length} 条，跳过 ${skipped} 个`);
 console.log(`  test: ${data.filter(d => d.kind === 'test').length}`);

@@ -421,3 +421,114 @@ test "ignore-case flag: backreference folds too" {
     fail("without i, backreference should be case-sensitive")
   }
 }
+
+///|
+test "quantifier iteration resets unparticipated groups" {
+  // test262 S15.10.2.5_A1_T4：嵌套可选组在 * 的最后一次迭代里未参与，
+  // 其捕获应为 undefined，而不是残留上一次迭代的值。
+  let m = match Regex::compile("(z)((a+)?(b+)?(c))*").exec("zaacbbbcac") {
+    Some(x) => x
+    None => {
+      fail("no match")
+      return
+    }
+  }
+  assert_eq(m.matched, "zaacbbbcac")
+  assert_eq(m.captures[1], Some("z"))
+  assert_eq(m.captures[2], Some("ac"))
+  assert_eq(m.captures[3], Some("a"))
+  assert_eq(m.captures[4], None) // (b+)? 最后一次迭代未参与
+  assert_eq(m.captures[5], Some("c"))
+}
+
+///|
+test "negative lookahead restores inner captures" {
+  // test262 S15.10.2.8_A2_T1：否定前瞻 (?!...) 成功时，内部 (a+) 的捕获
+  // 要恢复为未参与，前瞻外的 \2 才能按空串处理。
+  let m = match Regex::compile("(.*?)a(?!(a+)b\\2c)\\2(.*)").exec("baaabaac") {
+    Some(x) => x
+    None => {
+      fail("no match")
+      return
+    }
+  }
+  assert_eq(m.matched, "baaabaac")
+  assert_eq(m.index, 0)
+  assert_eq(m.captures[1], Some("ba"))
+  assert_eq(m.captures[2], None) // 前瞻内的 (a+) 未参与
+  assert_eq(m.captures[3], Some("abaac"))
+}
+
+///|
+test "positive lookahead keeps inner captures" {
+  // 正向前瞻 (?=...) 成功时，内部捕获要保留（可被前瞻外反向引用使用）。
+  // test262 S15.10.2.8_A1_T1: /(?=(a+))/.exec("baaabac") => ["", "aaa"]
+  let m = match Regex::compile("(?=(a+))").exec("baaabac") {
+    Some(x) => x
+    None => {
+      fail("no match")
+      return
+    }
+  }
+  assert_eq(m.matched, "")
+  assert_eq(m.index, 1)
+  assert_eq(m.captures[1], Some("aaa"))
+}
+
+///|
+test "lookbehind captures (test262 lookBehind/captures.js)" {
+  // 后瞻内的捕获组正确记录（期望来自 test262，Node 验证）
+  let m1 = match Regex::compile("(?<=(c))def").exec("abcdef") {
+    Some(x) => x
+    None => {
+      fail("no match #1")
+      return
+    }
+  }
+  assert_eq(m1.matched, "def")
+  assert_eq(m1.captures[1], Some("c"))
+
+  let m2 = match Regex::compile("(?<=(\\w{2}))def").exec("abcdef") {
+    Some(x) => x
+    None => {
+      fail("no match #2")
+      return
+    }
+  }
+  assert_eq(m2.captures[1], Some("bc"))
+
+  // 嵌套后瞻捕获
+  let m3 = match Regex::compile("(?<=(\\w(\\w)))def").exec("abcdef") {
+    Some(x) => x
+    None => {
+      fail("no match #3")
+      return
+    }
+  }
+  assert_eq(m3.captures[1], Some("bc"))
+  assert_eq(m3.captures[2], Some("c"))
+
+  // 分支后瞻：未选中的分支组为未参与
+  let m5 = match Regex::compile("(?<=(bc)|(cd)).").exec("abcdef") {
+    Some(x) => x
+    None => {
+      fail("no match #5")
+      return
+    }
+  }
+  assert_eq(m5.matched, "d")
+  assert_eq(m5.captures[1], Some("bc"))
+  assert_eq(m5.captures[2], None)
+
+  // 后瞻在模式中间 + 后续捕获组
+  let m7 = match Regex::compile("\\D(?<=([ab]+))(\\w)").exec("abcdef") {
+    Some(x) => x
+    None => {
+      fail("no match #7")
+      return
+    }
+  }
+  assert_eq(m7.matched, "ab")
+  assert_eq(m7.captures[1], Some("a"))
+  assert_eq(m7.captures[2], Some("b"))
+}
