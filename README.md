@@ -586,6 +586,7 @@ if !v.vocab_unevaluated { effective = without_keywords(effective, unevaluated_ke
 | 资源 | 用途 | 许可 |
 | --- | --- | --- |
 | [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) | 一致性测试数据，随仓库版本化在 `tests/JSON-Schema-Test-Suite/` | MIT |
+| [test262](https://github.com/tc39/test262) | 正则一致性用例（提取为 `tests/test262/data.json`），来源与提取说明见 `tests/test262/README.md` | BSD（Ecma International） |
 | [JSON Schema 规范](https://json-schema.org/) 的官方元 schema | 内联在 `src/metaschema/`，用于 `lint` | 见 [json-schema-spec LICENSE](https://github.com/json-schema-org/json-schema-spec/blob/main/LICENSE) |
 | Unicode 一般类别数据 | `src/regex/unicode_categories.mbt`，由 `scripts/gen-unicode-categories.mjs` 从宿主运行时的 `\p{...}` 生成 | Unicode License |
 

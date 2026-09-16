@@ -29,8 +29,8 @@ jobs:
           moon version --all
           node --version
 
-      - name: Type check
-        run: moon check
+      - name: Type check (all targets)
+        run: moon check --target all
 
       - name: Unit tests
         run: moon test
@@ -46,6 +46,9 @@ jobs:
 
       - name: Conformance suite (draft2020-12, required cases must be green)
         run: moon run --target js cmd/conformance
+
+      - name: test262 conformance (S15.10.2.x, no-flags subset)
+        run: moon run --target js cmd/test262
 
       - name: Smoke-test the CLI
         run: |
