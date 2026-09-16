@@ -326,6 +326,12 @@ moon run --target js cmd/test262
 （原始文件缓存在 `tests/test262/raw/`，可追溯）。剩余 2 条失败是「嵌套可选组 +
 贪婪量词回溯」下捕获组的精确重置语义，记录在[已知限制](#已知限制)。
 
+此外，`\d`／`\w`／`\s` 三个字符类转义另有一份**全码点穷举验证**：从 test262 的
+`CharacterClassEscapes` 提取三类转义的「应匹配码点集合」，在单元测试里对
+U+0000..U+10FFFF 的**每一个码点**逐一比对引擎判定与 test262 期望，`\D`／`\W`／`\S`
+作为补集自动覆盖。结果与 test262 完全一致（`charclass_escape_wbtest.mbt`，
+`moon test` 中的 3 条用例）。
+
 ### 2. JSON Schema 一致性套件（校验器测试床）
 
 ```sh
